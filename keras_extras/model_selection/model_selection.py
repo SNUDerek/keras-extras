@@ -1,7 +1,9 @@
 import re
+import h5py
 import numpy as np
 import itertools
 from sklearn.model_selection import KFold
+from datetime import date
 
 class KerasGridSearchCV:
     """
@@ -11,8 +13,8 @@ class KerasGridSearchCV:
     ----------
     make_model : function
         function that accepts param dict and outputs model
-    param_grid : dict
-        dictionary of hyperparam : lists of values (CONSTANTS : len-1 list)
+    params : dict or list
+        dictionary of hyperparam : lists of values OR list of dicts of hyperparam : value
     eval_model : function
         custom eval; should give higher-is-better metric score
     epochs : int
@@ -23,16 +25,30 @@ class KerasGridSearchCV:
         print out intermediate information during x-validation
     k_verbose : int
         verbosity setting for keras training (0, 1 or 2)
+    save_best : bool
+        save model weights and log if it is best so far
     """
     
-    def __init__(self, make_model, param_grid, eval_model=None, epochs=20, k=5, verbose=True, k_verbose=0, **kwargs):
+    def __init__(self, make_model, params, eval_model=None, epochs=20, k=5, verbose=True, k_verbose=0, save_best=True, **kwargs):
         self.make_model = make_model
+        # if params is a dict, make a list of all experiments
+        if type(params) is dict:
+            keys, values = zip(*params.items())
+            self.experiments = [dict(zip(keys, v)) for v in itertools.product(*values)]
+        # else check for list of dicts == partial experiments
+        elif type(params) is list:
+            if type(params[0]) is dict:
+                self.experiments = params
+            else:
+                raise TypeError
+        else:
+            raise TypeError
         self.eval_model = eval_model
-        self.param_grid = param_grid
-        self.k = k
         self.epochs = epochs
+        self.k = k
         self.verbose = verbose
         self.k_verbose = k_verbose
+        self.save_best = save_best
         self.kwargs = kwargs
         self.kf = KFold(n_splits=self.k, shuffle=True, random_state=1337)
         self.x_train = None
@@ -40,10 +56,36 @@ class KerasGridSearchCV:
         self.best_params = None
         self.trials = []
         self.scores = []
+    
+    def _savemodel(self, model, i, trial, score):
+        """
+        save model weights
         
+        Attributes
+        ----------
+        model : keras.model
+            trained candidate model
+        trial : dict
+            parameters of model as dictionary
+        score : float
+            the final average k-fold x-val score
+        """
+        model_name = str(date.today())+'_tmp_mdl_'+str(i)+'_'+"{:10.4f}".format(score)
+        model.save_weights(model_name+'.h5')
+        model_json = model.to_json()
+        with open(model_name+'.json', "w") as json_file:
+            json_file.write(model_json)
+        with open(model_name+'.log', 'w') as f:
+            f.write(str(date.today()))
+            f.write('\n')
+            f.write(str(trial))
+            f.write('\n')
+            f.write(str(score))
+        return
+    
     def accuracy_eval(self, model, x_val, y_val):
         """
-        evaluate single-loss fn with metrics=['accuracy]
+        evaluate single-loss fn with metrics=['accuracy']
 
         Attributes
         ----------
@@ -60,7 +102,7 @@ class KerasGridSearchCV:
             print('score:', score)
         return score
         
-    def fit(self, x_train, y_train, epochs=None, verbose=None, k_verbose=None):
+    def fit(self, x_train, y_train, epochs=None, verbose=None, k_verbose=None, save_best=None):
         """
         do a parameter grid search x-validation with the given data
 
@@ -75,6 +117,8 @@ class KerasGridSearchCV:
         verbose : bool
             same as init
         k_verbose : int
+            same as init
+        save_best : bool
             same as init
             
         Returns
@@ -94,13 +138,12 @@ class KerasGridSearchCV:
             self.verbose = verbose
         if k_verbose is not None:
             self.k_verbose = k_verbose
+        if save_best is not None:
+            self.save_best = save_best
         
-        # generate every combination of parameters
-        keys, values = zip(*self.param_grid.items())
-        for i, v in enumerate(itertools.product(*values)):
-            
-            # get sample params as dict
-            trial = dict(zip(keys, v))
+        # go through each experiment
+        for i, trial in enumerate(self.experiments):
+
             if self.verbose:
                 print()
                 print()
@@ -115,9 +158,6 @@ class KerasGridSearchCV:
             if self.verbose:
                 # save weights to re-initialize each fold
                 winit = trial_model.get_weights()
-                # trial_model.summary()
-                # print()
-                # print()
                 
             # k-fold sample
             # handle multi-input format
@@ -183,15 +223,19 @@ class KerasGridSearchCV:
             if len(self.scores) > 0:
                 if avg_score > max(self.scores):
                     self.best_params = trial
+                    if self.save_best:
+                        self._savemodel(trial_model, i, trial, avg_score)
                     if self.verbose:
                         print()
                         print("new best model with avg score", avg_score)
             else:
                 self.best_params = trial
+                if self.save_best:
+                    self._savemodel(trial_model, i, trial, avg_score)
                 if self.verbose:
                     print()
                     print("new best model with avg score", avg_score)
-            
+                        
             self.trials.append(trial)
             self.scores.append(avg_score)
             

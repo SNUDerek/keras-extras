@@ -26,7 +26,9 @@ this is a cross-validation script for `keras` models that extends functionality 
 
 this should be a dictionary of hyperparameters with keys as strings and values as lists of possible parameter values. for verbose output, you can define CONSTANTS in UPPERCASE, which will not be printed. *all values* must be a `list`, even constants, which will be a single-element list.
 
-Use this list in the following function:
+UPDATE: also accepts a list of dictionaries, where each dictionary defines one trial - for running only some experiments.
+
+Use this in the following function:
 
 ### 2. define a model generation function
 
@@ -57,6 +59,7 @@ other parameters are:
 - `k` : number of folds for k-fold cross-validation
 - `verbose` : boolean; whether to print log to console
 - `k_verbose` : the `verbose` setting for `keras` model fitting
+- `save_best` : save model weights and log file at each top-scoring model
 
 also, pass any extra things for evaluation using `**kwargs` such as tokenizers.
 
